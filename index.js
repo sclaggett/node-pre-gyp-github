@@ -127,10 +127,10 @@ NodePreGypGithub.prototype.publish = function(options) {
 	verbose = (typeof options.verbose === 'undefined' || options.verbose) ? true : false;
 	this.init();
 	this.octokit.authenticate(this.authenticate_settings());
-	this.octokit.repos.getReleases({
+	this.octokit.repos.listReleases({
 		'owner': this.owner,
 		'repo': this.repo
-	}, function(err, data){
+	}).then((err, data) => {
 		var release;
 		if(err) throw err;
 		
@@ -162,7 +162,7 @@ NodePreGypGithub.prototype.publish = function(options) {
       this.release = release[0];
 			this.uploadAssets();
 		}
-	}.bind(this));
+	});
 };
 
 module.exports = NodePreGypGithub;
