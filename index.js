@@ -49,21 +49,22 @@ NodePreGypGithub.prototype.init = function() {
 };
 
 NodePreGypGithub.prototype.authenticate_settings = function(){
-	var token = process.env.NODE_PRE_GYP_GITHUB_TOKEN;
-	if(!token) throw new Error('NODE_PRE_GYP_GITHUB_TOKEN environment variable not found');
-	return {
-		"type": "oauth",
-		"token": token
-	};
+       var token = process.env.NODE_PRE_GYP_GITHUB_TOKEN;
+       if(!token) throw new Error('NODE_PRE_GYP_GITHUB_TOKEN environment variable not found');
+       return {
+               "type": "oauth",
+               "token": token
+       };
 };
 
-NodePreGypGithub.prototype.createRelease = function(args, callback) {
+NodePreGypGithub.prototype.createRelease = function(args) {
 	var options = {
 		'host': this.host,
+		//'accept': 'application/vnd.github.v3+json',
 		'owner': this.owner,
 		'repo': this.repo,
 		'tag_name': this.package_json.version,
-		'target_commitish': 'master',
+		//'target_commitish': 'master',
 		'name': 'v' + this.package_json.version,
 		'body': this.package_json.name + ' ' + this.package_json.version,
 		'draft': true,
@@ -76,12 +77,12 @@ NodePreGypGithub.prototype.createRelease = function(args, callback) {
 		}
 	});
 	this.octokit.authenticate(this.authenticate_settings());
-	this.octokit.repos.createRelease(options, callback);
+	return this.octokit.repos.createRelease(options);
 };
 
 NodePreGypGithub.prototype.uploadAsset = function(cfg){
 	this.octokit.authenticate(this.authenticate_settings());
-	this.octokit.repos.uploadAsset({
+	return this.octokit.repos.uploadReleaseAsset({
     url: this.release.upload_url,
 		owner: this.owner,
 		id: this.release.id,
@@ -90,10 +91,7 @@ NodePreGypGithub.prototype.uploadAsset = function(cfg){
 		file: fs.createReadStream(cfg.filePath),
         contentType: mime.contentType(cfg.fileName) || 'application/octet-stream',
         contentLength: fs.statSync(cfg.filePath).size
-	}, function(err){
-		if(err) throw err;
-		consoleLog('Staged file ' + cfg.fileName + ' saved to ' + this.owner + '/' +  this.repo + ' release ' + this.release.tag_name + ' successfully.');
-	}.bind(this));
+	});
 };
 
 NodePreGypGithub.prototype.uploadAssets = function(){
@@ -117,6 +115,10 @@ NodePreGypGithub.prototype.uploadAssets = function(){
 			this.uploadAsset({
 				fileName: file,
 				filePath: path.join(this.stage_dir, file)
+			}).then(() => {
+				consoleLog('Staged file ' + file.fileName + ' saved to ' + this.owner + '/' +  this.repo + ' release ' + this.release.tag_name + ' successfully.');
+			}).catch((err) => {
+				throw err;
 			});
 		}.bind(this));
 	}.bind(this));
@@ -130,10 +132,7 @@ NodePreGypGithub.prototype.publish = function(options) {
 	this.octokit.repos.listReleases({
 		'owner': this.owner,
 		'repo': this.repo
-	}).then((err, data) => {
-		var release;
-		if(err) throw err;
-		
+	}).then(({ data }) => {
 		// when remote_path is set expect files to be in stage_dir / remote_path after substitution
 		if (this.package_json.binary.remote_path) {
 			options.tag_name = this.package_json.binary.remote_path.replace(/\{version\}/g, this.package_json.version);
@@ -142,12 +141,13 @@ NodePreGypGithub.prototype.publish = function(options) {
 			// This is here for backwards compatibility for before binary.remote_path support was added in version 1.2.0.
 			options.tag_name = this.package_json.version;
 		}
-		release = data.data.filter(function(element, index, array){
+
+		var release = data.filter(function(element, index, array){
 			return element.tag_name === options.tag_name;
     });
+
 		if(release.length === 0) {
-			this.createRelease(options, function(err, release) {
-				if(err) throw err;
+			this.createRelease(options).then((release) => {
 				this.release = release.data;
 				if (this.release.draft) {
 					consoleLog('Release ' + this.release.tag_name + " not found, so a draft release was created. YOU MUST MANUALLY PUBLISH THIS DRAFT WITHIN GITHUB FOR IT TO BE ACCESSIBLE.");
@@ -156,13 +156,17 @@ NodePreGypGithub.prototype.publish = function(options) {
 					consoleLog('Release ' + release.tag_name + " not found, so a new release was created and published.");
 				}
 				this.uploadAssets(this.release.upload_url);
-			}.bind(this));
+			}).catch(function(err) {
+				throw err;
+		  });;
 		}
 		else {
       this.release = release[0];
 			this.uploadAssets();
 		}
-	});
+	}).catch(function(err) {
+		throw err;
+  });;
 };
 
 module.exports = NodePreGypGithub;
